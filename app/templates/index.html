@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>S&P 500 Open Scanner</title>
+  <style>
+    body { font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial; margin: 24px; }
+    .muted { color: #666; }
+    .card { border: 1px solid #ddd; border-radius: 12px; padding: 16px; margin-bottom: 16px; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { text-align: left; padding: 8px; border-bottom: 1px solid #eee; vertical-align: top; }
+    th { font-size: 12px; text-transform: uppercase; letter-spacing: .03em; color: #444; }
+    .pill { display: inline-block; padding: 2px 10px; border-radius: 999px; border: 1px solid #ddd; font-size: 12px; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 12px; }
+  </style>
+</head>
+<body>
+  <h1>S&P 500 Open Scanner</h1>
+  <p class="muted">Scores represent estimated probabilities of reaching <strong>+5% intraday</strong> (primary) and <strong>+2% intraday</strong> (secondary) before the close.</p>
+
+  <div class="grid">
+    <div class="card">
+      <h3>Model</h3>
+      {% if model %}
+        <div><span class="pill">v{{ model.version }}</span></div>
+        <p class="muted">Trained: <span class="mono">{{ model.trained_at_utc }}</span></p>
+
+        {% set t5 = model.targets.get('5pct') if model.targets else None %}
+        {% set t2 = model.targets.get('2pct') if model.targets else None %}
+
+        {% if t5 %}
+          <p class="muted"><strong>+5%</strong> · <span class="pill">{{ t5.model_name }}</span>
+            {% if t5.metrics %}
+              <br/>Validation: AUC {{ '%.3f'|format(t5.metrics.auc) }} · Brier {{ '%.4f'|format(t5.metrics.brier) }} · LogLoss {{ '%.4f'|format(t5.metrics.logloss) }}
+            {% endif %}
+          </p>
+        {% endif %}
+
+        {% if t2 %}
+          <p class="muted"><strong>+2%</strong> · <span class="pill">{{ t2.model_name }}</span>
+            {% if t2.metrics %}
+              <br/>Validation: AUC {{ '%.3f'|format(t2.metrics.auc) }} · Brier {{ '%.4f'|format(t2.metrics.brier) }} · LogLoss {{ '%.4f'|format(t2.metrics.logloss) }}
+            {% endif %}
+          </p>
+        {% endif %}
+
+      {% else %}
+        <p class="muted">No model yet. Call <span class="mono">POST /api/train</span> with your bearer token, or run <span class="mono">python -m app.ml.train</span>.</p>
+      {% endif %}
+    </div>
+
+    <div class="card">
+      <h3>Latest scan</h3>
+      {% if latest and latest.scan %}
+        <p class="muted">Run: <span class="mono">{{ latest.scan.run_at_utc }}</span></p>
+        <p class="muted">Provider: <span class="pill">{{ latest.scan.provider }}</span> · Model: <span class="pill">{{ latest.scan.model_version }}</span></p>
+        <p class="muted">Market sentiment: <span class="pill">{{ latest.scan.market_sentiment.interpretation }}</span> (score {{ '%.2f'|format(latest.scan.market_sentiment.score) }})</p>
+        <details>
+          <summary class="muted">Sentiment components</summary>
+          <pre class="mono">{{ latest.scan.market_sentiment.components | tojson(indent=2) }}</pre>
+        </details>
+      {% else %}
+        <p class="muted">No scan results yet. Run the scan job or call <span class="mono">POST /api/run-scan</span>.</p>
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>Top tickers</h3>
+    {% if latest and latest.top and (latest.top|length > 0) %}
+      <table>
+        <thead>
+          <tr>
+            <th>Symbol</th>
+            <th>Score +5%</th>
+            <th>Prob +5%</th>
+            <th>Score +2%</th>
+            <th>Prob +2%</th>
+            <th>Signals</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for r in latest.top %}
+            <tr>
+              <td class="mono"><strong>{{ r.symbol }}</strong></td>
+              <td><span class="pill">{{ r.score }}</span></td>
+              <td>
+                {{ '%.1f'|format(r.prob_5pct*100) }}%
+                {% if r.prob_model is defined %}
+                  <div class="muted" style="font-size:12px">model {{ '%.1f'|format(r.prob_model*100) }}%</div>
+                {% endif %}
+              </td>
+              <td><span class="pill">{{ r.score_2pct }}</span></td>
+              <td>
+                {{ '%.1f'|format(r.prob_2pct*100) }}%
+                {% if r.prob_model_2pct is defined %}
+                  <div class="muted" style="font-size:12px">model {{ '%.1f'|format(r.prob_model_2pct*100) }}%</div>
+                {% endif %}
+              </td>
+              <td class="muted">
+                {% for s in (r.reasons.signals or []) %}
+                  <div>• {{ s }}</div>
+                {% endfor %}
+                {% if r.reasons.market_sentiment %}
+                  <div>• Market: {{ r.reasons.market_sentiment }}</div>
+                {% endif %}
+                {% if r.reasons.intraday and r.reasons.intraday.ret_5m is defined %}
+                  <div>• 5m: {{ '%.2f'|format(r.reasons.intraday.ret_5m*100) }}% · vol {{ '%.0f'|format(r.reasons.intraday.vol_5m) }}</div>
+                {% endif %}
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <p class="muted">No ticker scores yet.</p>
+    {% endif %}
+  </div>
+
+  <p class="muted">API: <span class="mono">GET /api/latest</span> · Admin: <span class="mono">POST /api/train</span> / <span class="mono">POST /api/run-scan</span> (Authorization: Bearer &lt;ADMIN_TOKEN&gt;)</p>
+</body>
+</html>

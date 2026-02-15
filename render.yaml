@@ -1,0 +1,60 @@
+services:
+  - type: web
+    name: sp500-open-scan
+    env: python
+    plan: starter
+    region: oregon
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /healthz
+    envVars:
+      - key: ADMIN_TOKEN
+        generateValue: true
+      - key: DATABASE_URL
+        fromDatabase:
+          name: sp500-open-scan-db
+          property: connectionString
+      - key: DATA_PROVIDER
+        value: alpaca
+      - key: ALPACA_KEY_ID
+        sync: false
+      - key: ALPACA_SECRET_KEY
+        sync: false
+      - key: ALPACA_FEED
+        value: sip
+      - key: SCAN_MAX_TICKERS
+        value: "500"
+      - key: SCAN_AT_MINUTES_AFTER_OPEN
+        value: "5"
+
+  # Runs at 13:35 and 14:35 UTC Mon-Fri to cover US market open across DST shifts.
+  - type: cron
+    name: sp500-open-scan-cron
+    env: python
+    plan: starter
+    schedule: "35 13,14 * * 1-5"
+    command: python -m app.jobs.run_scan
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: sp500-open-scan-db
+          property: connectionString
+      - key: ADMIN_TOKEN
+        sync: false
+      - key: DATA_PROVIDER
+        value: alpaca
+      - key: ALPACA_KEY_ID
+        sync: false
+      - key: ALPACA_SECRET_KEY
+        sync: false
+      - key: ALPACA_FEED
+        value: sip
+      - key: SCAN_MAX_TICKERS
+        value: "500"
+      - key: SCAN_AT_MINUTES_AFTER_OPEN
+        value: "5"
+
+databases:
+  - name: sp500-open-scan-db
+    plan: starter
+    region: oregon
